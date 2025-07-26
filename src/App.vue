@@ -1,0 +1,1033 @@
+<script setup lang="ts">
+import { ref, onMounted, onUnmounted, computed } from 'vue'
+import CalibrationPage from './components/CalibrationPage.vue'
+
+
+// 游戏状态
+const gameStarted = ref(false)
+const score = ref(0)
+const combo = ref(0)
+const gameOver = ref(false)
+const countdown = ref(0)
+const isCountingDown = ref(false)
+const clickAttempts = ref(0)
+const maxClickAttempts = 2
+const failureMessage = ref('')
+const showCalibration = ref(false)
+
+// 校准延迟设置
+const calibrationDelay = ref(0)
+const loadCalibrationData = () => {
+  const savedData = localStorage.getItem('audioCalibration')
+  if (savedData) {
+    try {
+      const data = JSON.parse(savedData)
+      calibrationDelay.value = data.averageDelay || 0
+      console.log('已加载校准延迟:', calibrationDelay.value, 'ms')
+    } catch (error) {
+      console.error('加载校准数据失败:', error)
+    }
+  }
+}
+
+
+// 错误提示状态
+interface ErrorIndicator {
+  id: number
+  x: number
+  y: number
+  visible: boolean
+}
+
+const errorIndicators = ref<ErrorIndicator[]>([])
+
+// 轨道数据
+interface TrackTile {
+  id: number
+  x: number
+  y: number
+  angle: number
+  isActive: boolean
+}
+
+// 星球状态
+interface Planet {
+  x: number
+  y: number
+  isOrbiting: boolean
+}
+
+const trackTiles = ref<TrackTile[]>([])
+const currentTileIndex = ref(0)
+const planets = ref<Planet[]>([
+  { x: 300, y: 300, isOrbiting: false }, // 火星球 (红色)
+  { x: 350, y: 300, isOrbiting: true }   // 冰星球 (蓝色)
+])
+
+const orbitRadius = 60
+const orbitAngle = ref(0)
+const orbitSpeed = 0.05
+let gameLoop: number | null = null
+// let lastTapTime = 0
+// const perfectTiming = 100 // 完美时机的毫秒范围
+
+// 摄像机跟随
+const cameraOffset = ref({ x: 0, y: 0 })
+const cameraSmooth = 0.1
+
+// 生成轨道
+const generateTrack = () => {
+  const tiles: TrackTile[] = []
+  let x = 300
+  let y = 300
+  let angle = 0
+  
+  // 生成一条简单的轨道路径
+  for (let i = 0; i < 20; i++) {
+    tiles.push({
+      id: i,
+      x,
+      y,
+      angle,
+      isActive: i === 0
+    })
+    
+    // 随机改变方向
+    if (i > 0 && Math.random() > 0.7) {
+      angle += (Math.random() - 0.5) * Math.PI / 2
+    }
+    
+    x += Math.cos(angle) * 50
+    y += Math.sin(angle) * 50
+  }
+  
+  trackTiles.value = tiles
+}
+
+// 计算环绕星球位置
+const getOrbitingPlanet = computed(() => {
+  const centerPlanet = planets.value.find(p => !p.isOrbiting)
+  if (!centerPlanet) return { x: 0, y: 0 }
+  
+  return {
+    x: centerPlanet.x + Math.cos(orbitAngle.value) * orbitRadius,
+    y: centerPlanet.y + Math.sin(orbitAngle.value) * orbitRadius
+  }
+})
+
+// 游戏控制
+const startGame = () => {
+  isCountingDown.value = true
+  countdown.value = 3
+  failureMessage.value = ''
+  
+  // 开始倒计时
+  const countdownInterval = setInterval(() => {
+    countdown.value--
+    if (countdown.value <= 0) {
+      clearInterval(countdownInterval)
+      isCountingDown.value = false
+      
+      // 正式开始游戏
+      gameStarted.value = true
+      gameOver.value = false
+      score.value = 0
+      combo.value = 0
+      currentTileIndex.value = 0
+      clickAttempts.value = 0
+      
+      // 重置摄像机位置
+      cameraOffset.value = { x: 0, y: 0 }
+      
+      generateTrack()
+      
+      // 设置小球初始位置在第一个瓦片上
+      const firstTile = trackTiles.value[0]
+      planets.value = [
+        { x: firstTile.x, y: firstTile.y, isOrbiting: false }, // 火星球在第一个瓦片上
+        { x: firstTile.x, y: firstTile.y, isOrbiting: true }   // 冰星球开始环绕
+      ]
+      
+      // 设置初始环绕角度，根据第二个瓦片的方向
+      const secondTile = trackTiles.value[1]
+      if (secondTile) {
+        const angle = Math.atan2(secondTile.y - firstTile.y, secondTile.x - firstTile.x)
+        orbitAngle.value = angle - Math.PI / 2 // 让环绕星球朝向下一个瓦片方向
+      } else {
+        orbitAngle.value = 0
+      }
+      
+      startGameLoop()
+    }
+  }, 1000)
+}
+
+const stopGame = () => {
+  gameStarted.value = false
+  gameOver.value = true
+  isCountingDown.value = false
+  clickAttempts.value = 0
+  if (gameLoop) {
+    cancelAnimationFrame(gameLoop)
+    gameLoop = null
+  }
+}
+
+// 游戏主循环
+const startGameLoop = () => {
+  const loop = () => {
+    if (!gameStarted.value) return
+    
+    // 更新环绕角度
+    orbitAngle.value += orbitSpeed
+    
+    // 更新摄像机跟随
+    const centerPlanet = planets.value.find(p => !p.isOrbiting)
+    if (centerPlanet) {
+      const targetX = 400 - centerPlanet.x // 屏幕中心为400px
+      const targetY = 300 - centerPlanet.y // 屏幕中心为300px
+      
+      cameraOffset.value.x += (targetX - cameraOffset.value.x) * cameraSmooth
+      cameraOffset.value.y += (targetY - cameraOffset.value.y) * cameraSmooth
+    }
+    
+    gameLoop = requestAnimationFrame(loop)
+  }
+  
+  gameLoop = requestAnimationFrame(loop)
+}
+
+// 按键处理 - 单按键游戏
+const handleKeyDown = (event: KeyboardEvent) => {
+  if (!gameStarted.value || gameOver.value) return
+  
+  // 任意键都可以触发
+  if (event.code === 'Space' || event.code === 'Enter' || 
+      event.code === 'KeyX' || event.code === 'KeyZ') {
+    event.preventDefault()
+    handleTap()
+  }
+}
+
+const handleTap = () => {
+  // const currentTime = Date.now()
+  
+  // // 应用校准延迟补偿
+  // const adjustedTime = currentTime + calibrationDelay.value
+  
+  // 检查是否在正确的时机点击
+  const currentTile = trackTiles.value[currentTileIndex.value]
+  const nextTile = trackTiles.value[currentTileIndex.value + 1]
+  
+  if (!currentTile || !nextTile) {
+    // 游戏结束
+    stopGame()
+    return
+  }
+  
+  const centerPlanet = planets.value.find(p => !p.isOrbiting)
+  if (!centerPlanet) return
+  
+  // 计算从中心星球到下一个瓦片的目标角度
+  const targetAngle = Math.atan2(nextTile.y - centerPlanet.y, nextTile.x - centerPlanet.x)
+  
+  // 标准化角度到 [0, 2π] 范围
+  const normalizeAngle = (angle: number) => {
+    while (angle < 0) angle += 2 * Math.PI
+    while (angle >= 2 * Math.PI) angle -= 2 * Math.PI
+    return angle
+  }
+  
+  const normalizedTarget = normalizeAngle(targetAngle)
+  const normalizedCurrent = normalizeAngle(orbitAngle.value)
+  
+  // 计算角度差（考虑环形特性）
+  let angleDiff = Math.abs(normalizedTarget - normalizedCurrent)
+  if (angleDiff > Math.PI) {
+    angleDiff = 2 * Math.PI - angleDiff
+  }
+  
+  // 计算环绕星球的实际位置
+  const orbitingPlanetPos = getOrbitingPlanet.value
+  const distanceToTarget = Math.sqrt(
+    Math.pow(orbitingPlanetPos.x - nextTile.x, 2) + 
+    Math.pow(orbitingPlanetPos.y - nextTile.y, 2)
+  )
+  
+  // 调试信息
+  console.log('目标角度:', (normalizedTarget * 180 / Math.PI).toFixed(1), '°')
+  console.log('当前角度:', (normalizedCurrent * 180 / Math.PI).toFixed(1), '°')
+  console.log('角度差:', (angleDiff * 180 / Math.PI).toFixed(1), '°')
+  console.log('距离目标:', distanceToTarget.toFixed(1), 'px')
+  console.log('点击次数:', clickAttempts.value + 1)
+  
+  // 更严格的击中判断：既要角度接近，也要距离接近
+  const hitAngleRange = Math.PI / 18 // 10度
+  const hitDistanceRange = 40 // 40像素内
+  
+  const isAngleGood = angleDiff < hitAngleRange
+  const isDistanceGood = distanceToTarget < hitDistanceRange
+  
+  if (isAngleGood && isDistanceGood) {
+    // 成功击中
+    currentTileIndex.value++
+    combo.value++
+    score.value += 100 + combo.value * 10
+    clickAttempts.value = 0 // 重置点击次数
+    failureMessage.value = '' // 清除失败消息
+    
+    console.log('击中成功！角度差:', (angleDiff * 180 / Math.PI).toFixed(1), '°', '距离:', distanceToTarget.toFixed(1), 'px')
+    
+    // 切换星球角色
+    planets.value.forEach(planet => {
+      planet.isOrbiting = !planet.isOrbiting
+    })
+    
+    // 更新星球位置到新的瓦片
+    const newCenterPlanet = planets.value.find(p => !p.isOrbiting)
+    if (newCenterPlanet) {
+      newCenterPlanet.x = nextTile.x
+      newCenterPlanet.y = nextTile.y
+    }
+    
+    // 重置环绕角度 - 根据下一个瓦片的方向设置初始角度
+    const nextNextTile = trackTiles.value[currentTileIndex.value + 1]
+    if (nextNextTile) {
+      const angle = Math.atan2(nextNextTile.y - nextTile.y, nextNextTile.x - nextTile.x)
+      orbitAngle.value = angle - Math.PI / 2 // 让环绕星球朝向下一个瓦片方向
+    } else {
+      orbitAngle.value = 0
+    }
+    
+    // 更新活跃瓦片
+    trackTiles.value.forEach((tile, index) => {
+      tile.isActive = index === currentTileIndex.value
+    })
+    
+    // 检查是否完成所有瓦片
+    if (currentTileIndex.value >= trackTiles.value.length - 1) {
+      stopGame()
+    }
+  } else {
+    // 错过了，增加点击次数
+    clickAttempts.value++
+    
+    // 在错误位置显示视觉反馈
+    showErrorIndicator(orbitingPlanetPos.x, orbitingPlanetPos.y)
+    
+    // 更精确的失败原因判断
+    let feedbackMessage = ''
+    if (!isAngleGood && !isDistanceGood) {
+      const isTooEarly = normalizedCurrent < normalizedTarget
+      feedbackMessage = isTooEarly ? '点击太快了！' : '点击太慢了！'
+    } else if (!isAngleGood) {
+      const isTooEarly = normalizedCurrent < normalizedTarget
+      feedbackMessage = isTooEarly ? '点击太快了！' : '点击太慢了！'
+    } else if (!isDistanceGood) {
+      feedbackMessage = '时机不对！'
+    }
+    
+    console.log('击中失败，角度差:', (angleDiff * 180 / Math.PI).toFixed(1), '°', '距离:', distanceToTarget.toFixed(1), 'px')
+    console.log('需要角度小于:', (hitAngleRange * 180 / Math.PI).toFixed(1), '°', '距离小于:', hitDistanceRange, 'px')
+    console.log(feedbackMessage)
+    
+    if (clickAttempts.value >= maxClickAttempts) {
+      // 两次机会都用完了，游戏结束
+      failureMessage.value = `${feedbackMessage} 游戏结束！`
+      combo.value = 0
+      stopGame()
+    } else {
+      // 还有机会，显示提示
+      failureMessage.value = `${feedbackMessage} 还有 ${maxClickAttempts - clickAttempts.value} 次机会`
+      combo.value = 0
+    }
+  }
+}
+
+// 显示错误提示
+const showErrorIndicator = (x: number, y: number) => {
+  const id = Date.now() + Math.random()
+  const indicator: ErrorIndicator = {
+    id,
+    x,
+    y,
+    visible: true
+  }
+  
+  errorIndicators.value.push(indicator)
+  
+  // 0.5秒后移除
+  setTimeout(() => {
+    const index = errorIndicators.value.findIndex(item => item.id === id)
+    if (index !== -1) {
+      errorIndicators.value.splice(index, 1)
+    }
+  }, 500)
+}
+
+// 游戏结束后的操作
+const restartGame = () => {
+  gameOver.value = false
+  startGame()
+}
+
+const backToHome = () => {
+  gameOver.value = false
+  gameStarted.value = false
+  isCountingDown.value = false
+  score.value = 0
+  combo.value = 0
+  currentTileIndex.value = 0
+  clickAttempts.value = 0
+  failureMessage.value = ''
+  errorIndicators.value = []
+  if (gameLoop) {
+    cancelAnimationFrame(gameLoop)
+    gameLoop = null
+  }
+}
+
+// 校准功能
+const calibrate = () => {
+  showCalibration.value = true
+}
+
+const closeCalibration = () => {
+  showCalibration.value = false
+  loadCalibrationData() // 重新加载校准数据
+}
+
+
+
+// 生成轨道路径SVG
+const getTrackPath = () => {
+  if (trackTiles.value.length === 0) return ''
+  
+  let path = `M ${trackTiles.value[0].x} ${trackTiles.value[0].y}`
+  
+  for (let i = 1; i < trackTiles.value.length; i++) {
+    const tile = trackTiles.value[i]
+    path += ` L ${tile.x} ${tile.y}`
+  }
+  
+  return path
+}
+
+// 生命周期
+onMounted(() => {
+  window.addEventListener('keydown', handleKeyDown)
+  generateTrack()
+  loadCalibrationData() // 加载校准数据
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeyDown)
+  if (gameLoop) {
+    cancelAnimationFrame(gameLoop)
+  }
+})
+</script>
+
+<template>
+  <div class="game-container">
+    <!-- 游戏标题 -->
+    <div class="game-title">
+      <h1>🔥 冰与火之舞 ❄️</h1>
+      <p>按 空格键/X/Z/回车 来切换星球轨道</p>
+    </div>
+    
+    <!-- 倒计时显示 -->
+    <div v-if="isCountingDown" class="countdown-overlay">
+      <div class="countdown-number">{{ countdown > 0 ? countdown : 'GO!' }}</div>
+      <p>准备开始游戏...</p>
+    </div>
+    
+    <!-- 游戏信息面板 -->
+    <div class="game-info" v-if="gameStarted">
+      <div class="info-item">
+        <span>得分: {{ score }}</span>
+      </div>
+      <div class="info-item">
+        <span>连击: {{ combo }}</span>
+      </div>
+      <div class="info-item">
+        <span>进度: {{ currentTileIndex }}/{{ trackTiles.length - 1 }}</span>
+      </div>
+      <div class="info-item" v-if="clickAttempts > 0">
+        <span>剩余机会: {{ maxClickAttempts - clickAttempts }}</span>
+      </div>
+
+    </div>
+    
+    <!-- 失败消息提示 -->
+    <div v-if="failureMessage" class="failure-message">
+      {{ failureMessage }}
+    </div>
+    
+    <!-- 游戏区域 -->
+    <div class="game-area" v-if="gameStarted" :style="{ transform: `translate(${cameraOffset.x}px, ${cameraOffset.y}px)` }">
+      <!-- 轨道瓦片 -->
+      <div 
+        v-for="tile in trackTiles" 
+        :key="tile.id"
+        class="track-tile"
+        :class="{ 'active-tile': tile.isActive, 'completed-tile': tile.id < currentTileIndex }"
+        :style="{ 
+          left: tile.x + 'px', 
+          top: tile.y + 'px' 
+        }"
+      ></div>
+      
+      <!-- 共享圆环轨道 -->
+      <div 
+        class="shared-orbit-container"
+        :style="{ 
+          left: (trackTiles[currentTileIndex] ? trackTiles[currentTileIndex].x : planets[0].x ) + 'px', 
+          top: (trackTiles[currentTileIndex] ? trackTiles[currentTileIndex].y : planets[0].y) + 'px' 
+        }"
+      >
+        <div class="shared-orbit" :class="{ 'orbiting': planets.some(p => p.isOrbiting) }"></div>
+      </div>
+      
+      <!-- 星球 -->
+      <div 
+        v-for="(planet, index) in planets" 
+        :key="index"
+        class="planet"
+        :class="{ 
+          'fire-planet': index === 0, 
+          'ice-planet': index === 1,
+          'orbiting': planet.isOrbiting
+        }"
+        :style="{ 
+          left: planet.isOrbiting ? getOrbitingPlanet.x + 'px' : planet.x + 'px', 
+          top: planet.isOrbiting ? getOrbitingPlanet.y + 'px' : planet.y + 'px' 
+        }"
+      ></div>
+      
+      <!-- 轨道路径线 -->
+      <svg class="track-path" width="1600" height="1200">
+        <path 
+          :d="getTrackPath()" 
+          stroke="rgba(255,255,255,0.3)" 
+          stroke-width="2" 
+          fill="none"
+          stroke-dasharray="5,5"
+        />
+      </svg>
+      
+      <!-- 错误提示指示器 -->
+      <div 
+        v-for="indicator in errorIndicators" 
+        :key="indicator.id"
+        class="error-indicator"
+        :style="{ 
+          left: indicator.x + 'px', 
+          top: indicator.y + 'px' 
+        }"
+      >
+        <div class="error-ball">
+          <div class="error-cross">
+            <div class="cross-line cross-line-1"></div>
+            <div class="cross-line cross-line-2"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- 开始/结束按钮 -->
+    <div class="game-controls">
+      <button v-if="!gameStarted && !isCountingDown" @click="startGame" class="start-btn">
+        开始游戏
+      </button>
+      <button v-if="!gameStarted && !isCountingDown" @click="calibrate" class="calibrate-btn">
+        校准
+      </button>
+      <button v-if="gameStarted" @click="stopGame" class="stop-btn">
+        结束游戏
+      </button>
+    </div>
+    
+    <!-- 游戏结束提示 -->
+    <div v-if="gameOver" class="game-over-overlay">
+      <div class="game-over-content">
+        <h2>{{ currentTileIndex >= trackTiles.length - 1 ? '恭喜完成!' : '游戏结束!' }}</h2>
+        <p>最终得分: {{ score }}</p>
+        <p>最高连击: {{ combo }}</p>
+        <p>完成进度: {{ currentTileIndex }}/{{ trackTiles.length - 1 }}</p>
+        
+        <div class="game-over-buttons">
+          <button @click="restartGame" class="game-over-btn restart-btn">
+            重新开始
+          </button>
+          <button @click="backToHome" class="game-over-btn home-btn">
+            回到主页
+          </button>
+          <button @click="calibrate" class="game-over-btn calibrate-btn">
+            校准
+          </button>
+        </div>
+      </div>
+    </div>
+      
+      <!-- 校准页面 -->
+      <CalibrationPage v-if="showCalibration" @close="closeCalibration" />
+      
+    </div>
+  </template>
+
+<style scoped>
+.game-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100vh;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  color: white;
+  font-family: 'Arial', sans-serif;
+  padding: 20px;
+  overflow: hidden;
+}
+
+.game-title {
+  text-align: center;
+  margin-bottom: 20px;
+  z-index: 10;
+}
+
+.game-title h1 {
+  font-size: 2.5rem;
+  margin: 0;
+  text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+  background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.game-title p {
+  margin: 10px 0;
+  opacity: 0.8;
+  font-size: 1.1rem;
+}
+
+.game-info {
+  display: flex;
+  gap: 30px;
+  margin-bottom: 20px;
+  background: rgba(255,255,255,0.1);
+  padding: 15px 30px;
+  border-radius: 10px;
+  backdrop-filter: blur(10px);
+  z-index: 10;
+}
+
+.info-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  font-weight: bold;
+}
+
+.game-area {
+  position: relative;
+  width: 1200px;
+  height: 900px;
+  background: radial-gradient(circle at center, rgba(255,255,255,0.05) 0%, transparent 70%);
+  border-radius: 15px;
+  overflow: visible;
+  transition: transform 0.1s ease-out;
+}
+
+.track-path {
+  position: absolute;
+  top: -300px;
+  left: -400px;
+  z-index: 1;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.track-tile {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  background: rgba(255,255,255,0.3);
+  border: 2px solid rgba(255,255,255,0.5);
+  border-radius: 3px;
+  transform: translate(-50%, -50%);
+  transition: all 0.3s ease;
+  z-index: 2;
+}
+
+.track-tile.active-tile {
+  background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
+  border-color: white;
+  box-shadow: 0 0 20px rgba(255,255,255,0.8);
+  animation: activePulse 1s ease-in-out infinite;
+}
+
+.track-tile.completed-tile {
+  background: rgba(100,255,100,0.6);
+  border-color: rgba(100,255,100,0.8);
+}
+
+@keyframes activePulse {
+  0%, 100% { transform: translate(-50%, -50%) scale(1); }
+  50% { transform: translate(-50%, -50%) scale(1.2); }
+}
+
+.shared-orbit-container {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  z-index: 3;
+}
+
+.shared-orbit {
+  position: absolute;
+  width: 95px;
+  height: 95px;
+  border: 2px dashed rgba(255,182,193,0.6);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: transparent;
+}
+
+.shared-orbit.orbiting {
+  border-color: rgba(255,182,193,0.8);
+}
+
+.planet {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 5;
+  transition: all 0.2s ease;
+  border: 3px solid white;
+  box-shadow: 0 0 15px rgba(255,255,255,0.5);
+}
+
+@keyframes orbitRotate {
+  from { transform: translate(-50%, -50%) rotate(0deg); }
+  to { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
+.fire-planet {
+  background: radial-gradient(circle at 30% 30%, #ff9a9e, #ff6b6b, #ff4757);
+  box-shadow: 0 0 20px rgba(255,107,107,0.8);
+}
+
+.ice-planet {
+  background: radial-gradient(circle at 30% 30%, #a8edea, #4ecdc4, #45b7aa);
+  box-shadow: 0 0 20px rgba(78,205,196,0.8);
+}
+
+.planet.orbiting {
+  animation: orbitGlow 0.5s ease-in-out infinite alternate;
+}
+
+@keyframes orbitGlow {
+  from { 
+    box-shadow: 0 0 15px rgba(255,255,255,0.5);
+    transform: translate(-50%, -50%) scale(1);
+  }
+  to { 
+    box-shadow: 0 0 25px rgba(255,255,255,0.9);
+    transform: translate(-50%, -50%) scale(1.1);
+  }
+}
+
+/* 错误提示样式 */
+.error-indicator {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  z-index: 5;
+  animation: errorFadeOut 0.5s ease-out forwards;
+}
+
+.error-ball {
+  width: 16px;
+  height: 16px;
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.5);
+}
+
+.error-cross {
+  position: relative;
+  width: 10px;
+  height: 10px;
+}
+
+.cross-line {
+  position: absolute;
+  background: #ff4757;
+  border-radius: 1px;
+}
+
+.cross-line-1 {
+  width: 10px;
+  height: 2px;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%) rotate(45deg);
+}
+
+.cross-line-2 {
+  width: 10px;
+  height: 2px;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%) rotate(-45deg);
+}
+
+@keyframes errorFadeOut {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  70% {
+    opacity: 0.8;
+    transform: translate(-50%, -50%) scale(1.1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.8);
+  }
+}
+
+.game-controls {
+  margin-top: 20px;
+  z-index: 10;
+  display: flex;
+  gap: 15px;
+  justify-content: center;
+}
+
+.start-btn, .stop-btn, .game-controls .calibrate-btn {
+  padding: 15px 30px;
+  font-size: 1.2rem;
+  border: none;
+  border-radius: 25px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.start-btn {
+  background: linear-gradient(45deg, #56ab2f, #a8e6cf);
+  color: white;
+}
+
+.start-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 15px rgba(0,0,0,0.3);
+}
+
+.stop-btn {
+  background: linear-gradient(45deg, #ff416c, #ff4b2b);
+  color: white;
+}
+
+.stop-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 15px rgba(0,0,0,0.3);
+}
+
+.game-controls .calibrate-btn {
+  background: linear-gradient(45deg, #f093fb, #f5576c);
+  color: white;
+}
+
+.game-controls .calibrate-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 15px rgba(0,0,0,0.3);
+}
+
+.game-over-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0,0,0,0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(5px);
+}
+
+.game-over-content {
+  background: rgba(26,26,46,0.95);
+  color: white;
+  padding: 40px;
+  border-radius: 20px;
+  text-align: center;
+  border: 2px solid rgba(255,255,255,0.2);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+}
+
+.game-over-content h2 {
+  margin: 0 0 20px 0;
+  font-size: 2rem;
+  background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.game-over-content p {
+  margin: 10px 0;
+  font-size: 1.1rem;
+  opacity: 0.9;
+}
+
+.game-over-buttons {
+  display: flex;
+  gap: 15px;
+  margin-top: 30px;
+  justify-content: center;
+}
+
+.game-over-btn {
+  padding: 12px 24px;
+  font-size: 1rem;
+  font-weight: bold;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  color: white;
+}
+
+.restart-btn {
+  background: linear-gradient(45deg, #4ecdc4, #44a08d);
+  box-shadow: 0 4px 15px rgba(78,205,196,0.4);
+}
+
+.restart-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(78,205,196,0.6);
+}
+
+.home-btn {
+  background: linear-gradient(45deg, #667eea, #764ba2);
+  box-shadow: 0 4px 15px rgba(102,126,234,0.4);
+}
+
+.home-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(102,126,234,0.6);
+}
+
+.calibrate-btn {
+  background: linear-gradient(45deg, #f093fb, #f5576c);
+  box-shadow: 0 4px 15px rgba(240,147,251,0.4);
+}
+
+.calibrate-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(240,147,251,0.6);
+}
+
+/* 添加一些星空背景效果 */
+.game-container::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: 
+    radial-gradient(2px 2px at 20px 30px, #eee, transparent),
+    radial-gradient(2px 2px at 40px 70px, rgba(255,255,255,0.8), transparent),
+    radial-gradient(1px 1px at 90px 40px, #fff, transparent),
+    radial-gradient(1px 1px at 130px 80px, rgba(255,255,255,0.6), transparent),
+    radial-gradient(2px 2px at 160px 30px, #ddd, transparent);
+  background-repeat: repeat;
+  background-size: 200px 100px;
+  animation: sparkle 20s linear infinite;
+  z-index: 0;
+  pointer-events: none;
+}
+
+@keyframes sparkle {
+  from { transform: translateX(0); }
+  to { transform: translateX(-200px); }
+}
+
+/* 倒计时样式 */
+.countdown-overlay {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  z-index: 30;
+  background: rgba(0,0,0,0.8);
+  padding: 60px;
+  border-radius: 20px;
+  border: 3px solid #4ecdc4;
+  box-shadow: 0 0 40px rgba(78,205,196,0.6);
+}
+
+.countdown-number {
+  font-size: 6rem;
+  font-weight: bold;
+  color: #4ecdc4;
+  text-shadow: 0 0 20px rgba(78,205,196,0.8);
+  margin-bottom: 20px;
+  animation: countdownPulse 1s ease-in-out;
+}
+
+@keyframes countdownPulse {
+  0% { transform: scale(0.8); opacity: 0; }
+  50% { transform: scale(1.2); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.countdown-overlay p {
+  font-size: 1.5rem;
+  color: white;
+  margin: 0;
+}
+
+/* 失败消息样式 */
+.failure-message {
+  position: fixed;
+  top: 20%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255, 65, 108, 0.9);
+  color: white;
+  padding: 20px 40px;
+  border-radius: 15px;
+  font-size: 1.3rem;
+  font-weight: bold;
+  text-align: center;
+  z-index: 25;
+  border: 2px solid #ff416c;
+  box-shadow: 0 0 20px rgba(255, 65, 108, 0.5);
+  animation: messageSlideIn 0.5s ease-out;
+}
+
+@keyframes messageSlideIn {
+  from {
+    transform: translateX(-50%) translateY(-20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
+  }
+}
+</style>
