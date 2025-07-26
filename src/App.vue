@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import CalibrationPage from './components/CalibrationPage.vue'
 
 
@@ -14,6 +14,63 @@ const clickAttempts = ref(0)
 const maxClickAttempts = 2
 const failureMessage = ref('')
 const showCalibration = ref(false)
+
+// 颜色选择
+const firePlanetColor = ref(localStorage.getItem('firePlanetColor') || 'red')
+const icePlanetColor = ref(localStorage.getItem('icePlanetColor') || 'blue')
+const showColorModal = ref(false)
+const currentEditingPlanet = ref('') // 'fire' or 'ice'
+
+// 颜色选项
+const colorOptions = {
+  fire: [
+    { name: 'red', gradient: 'linear-gradient(45deg, #ff9a9e, #ff6b6b, #ff4757)', shadow: 'rgba(255,107,107,0.8)' },
+    { name: 'orange', gradient: 'linear-gradient(45deg, #ffa726, #ff9800, #f57c00)', shadow: 'rgba(255,152,0,0.8)' },
+    { name: 'purple', gradient: 'linear-gradient(45deg, #ba68c8, #9c27b0, #7b1fa2)', shadow: 'rgba(156,39,176,0.8)' },
+    { name: 'pink', gradient: 'linear-gradient(45deg, #f48fb1, #e91e63, #c2185b)', shadow: 'rgba(233,30,99,0.8)' },
+    { name: 'yellow', gradient: 'linear-gradient(45deg, #fff176, #ffeb3b, #fbc02d)', shadow: 'rgba(255,235,59,0.8)' },
+    { name: 'crimson', gradient: 'linear-gradient(45deg, #ef5350, #f44336, #d32f2f)', shadow: 'rgba(244,67,54,0.8)' }
+  ],
+  ice: [
+    { name: 'blue', gradient: 'linear-gradient(45deg, #a8edea, #4ecdc4, #45b7aa)', shadow: 'rgba(78,205,196,0.8)' },
+    { name: 'cyan', gradient: 'linear-gradient(45deg, #81d4fa, #29b6f6, #0288d1)', shadow: 'rgba(41,182,246,0.8)' },
+    { name: 'green', gradient: 'linear-gradient(45deg, #a5d6a7, #66bb6a, #43a047)', shadow: 'rgba(102,187,106,0.8)' },
+    { name: 'teal', gradient: 'linear-gradient(45deg, #80cbc4, #26a69a, #00695c)', shadow: 'rgba(38,166,154,0.8)' },
+    { name: 'indigo', gradient: 'linear-gradient(45deg, #9fa8da, #5c6bc0, #3949ab)', shadow: 'rgba(92,107,192,0.8)' },
+    { name: 'mint', gradient: 'linear-gradient(45deg, #b2dfdb, #4db6ac, #00695c)', shadow: 'rgba(77,182,172,0.8)' }
+  ]
+}
+
+// 监听颜色变化并保存到localStorage
+watch(firePlanetColor, (newColor) => {
+  localStorage.setItem('firePlanetColor', newColor)
+})
+
+watch(icePlanetColor, (newColor) => {
+  localStorage.setItem('icePlanetColor', newColor)
+})
+
+// 打开颜色选择弹框
+const openColorModal = (planetType: string) => {
+  currentEditingPlanet.value = planetType
+  showColorModal.value = true
+}
+
+// 选择颜色
+const selectColor = (colorName: string) => {
+  if (currentEditingPlanet.value === 'fire') {
+    firePlanetColor.value = colorName
+  } else {
+    icePlanetColor.value = colorName
+  }
+  showColorModal.value = false
+}
+
+// 关闭弹框
+const closeColorModal = () => {
+  showColorModal.value = false
+  currentEditingPlanet.value = ''
+}
 
 // 校准延迟设置
 const calibrationDelay = ref(0)
@@ -435,6 +492,28 @@ onUnmounted(() => {
       <h1>🔥 冰与火之舞 ❄️</h1>
       <p>按 空格键/X/Z/回车 来切换星球轨道</p>
     </div>
+
+    <!-- 主页预览区域 -->
+    <div v-if="!gameStarted && !showCalibration" class="home-preview">
+      <div class="preview-container">
+        <div class="preview-orbit"></div>
+        <div class="preview-planet fire-planet" :data-color="firePlanetColor"></div>
+        <div class="preview-planet ice-planet" :data-color="icePlanetColor"></div>
+      </div>
+      <p class="preview-text">当前延迟设置: {{ Math.floor(calibrationDelay) }}ms</p>
+      
+      <!-- 颜色选择按钮 -->
+       <div class="color-selector">
+         <button class="color-btn fire-btn" @click="openColorModal('fire')">
+           <span class="btn-icon fire-planet" :data-color="firePlanetColor"></span>
+           更换火星球颜色
+         </button>
+         <button class="color-btn ice-btn" @click="openColorModal('ice')">
+           <span class="btn-icon ice-planet" :data-color="icePlanetColor"></span>
+           更换冰星球颜色
+         </button>
+       </div>
+    </div>
     
     <!-- 倒计时显示 -->
     <div v-if="isCountingDown" class="countdown-overlay">
@@ -455,6 +534,9 @@ onUnmounted(() => {
       </div>
       <div class="info-item" v-if="clickAttempts > 0">
         <span>剩余机会: {{ maxClickAttempts - clickAttempts }}</span>
+      </div>
+      <div class="info-item">
+        <span>延迟: {{ Math.floor(calibrationDelay) }}ms</span>
       </div>
 
     </div>
@@ -499,6 +581,7 @@ onUnmounted(() => {
           'ice-planet': index === 1,
           'orbiting': planet.isOrbiting
         }"
+        :data-color="index === 0 ? firePlanetColor : icePlanetColor"
         :style="{ 
           left: planet.isOrbiting ? getOrbitingPlanet.x + 'px' : planet.x + 'px', 
           top: planet.isOrbiting ? getOrbitingPlanet.y + 'px' : planet.y + 'px' 
@@ -573,6 +656,32 @@ onUnmounted(() => {
       <!-- 校准页面 -->
       <CalibrationPage v-if="showCalibration" @close="closeCalibration" />
       
+    <!-- 颜色选择弹框 -->
+    <div v-if="showColorModal" class="color-modal-overlay" @click="closeColorModal">
+      <div class="color-modal" @click.stop>
+        <div class="modal-header">
+          <h3>选择{{ currentEditingPlanet === 'fire' ? '火星球' : '冰星球' }}颜色</h3>
+          <button class="close-btn" @click="closeColorModal">×</button>
+        </div>
+        <div class="modal-content">
+          <div class="color-grid">
+            <div 
+              v-for="color in colorOptions[currentEditingPlanet]"
+              :key="color.name"
+              class="modal-color-option"
+              :class="{ 
+                active: (currentEditingPlanet === 'fire' ? firePlanetColor : icePlanetColor) === color.name 
+              }"
+              :style="{ background: color.gradient }"
+              @click="selectColor(color.name)"
+            >
+              <div class="color-name">{{ color.name }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+      
     </div>
   </template>
 
@@ -581,12 +690,144 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   min-height: 100vh;
   background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
   color: white;
   font-family: 'Arial', sans-serif;
   padding: 20px;
   overflow: hidden;
+  position: relative;
+  z-index: 1;
+}
+
+/* 主页预览区域样式 */
+.home-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 40px 0;
+  z-index: 10;
+}
+
+.preview-container {
+  position: relative;
+  width: 200px;
+  height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 20px;
+}
+
+.preview-orbit {
+  position: absolute;
+  width: 120px;
+  height: 120px;
+  border: 2px dashed rgba(255,182,193,0.6);
+  border-radius: 50%;
+  animation: previewOrbitRotate 4s linear infinite;
+}
+
+@keyframes previewOrbitRotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.preview-planet {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 3px solid white;
+  box-shadow: 0 0 15px rgba(255,255,255,0.5);
+}
+
+.preview-planet.fire-planet {
+  background: radial-gradient(circle at 30% 30%, #ff9a9e, #ff6b6b, #ff4757);
+  box-shadow: 0 0 20px rgba(255,107,107,0.8);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.preview-planet.fire-planet[data-color="orange"] {
+   background: radial-gradient(circle at 30% 30%, #ffa726, #ff9800, #f57c00);
+   box-shadow: 0 0 20px rgba(255,152,0,0.8);
+ }
+ 
+ .preview-planet.fire-planet[data-color="purple"] {
+   background: radial-gradient(circle at 30% 30%, #ba68c8, #9c27b0, #7b1fa2);
+   box-shadow: 0 0 20px rgba(156,39,176,0.8);
+ }
+
+ .preview-planet.fire-planet[data-color="pink"] {
+   background: radial-gradient(circle at 30% 30%, #f48fb1, #e91e63, #c2185b);
+   box-shadow: 0 0 20px rgba(233,30,99,0.8);
+ }
+
+ .preview-planet.fire-planet[data-color="yellow"] {
+   background: radial-gradient(circle at 30% 30%, #fff176, #ffeb3b, #fbc02d);
+   box-shadow: 0 0 20px rgba(255,235,59,0.8);
+ }
+
+ .preview-planet.fire-planet[data-color="crimson"] {
+   background: radial-gradient(circle at 30% 30%, #ef5350, #f44336, #d32f2f);
+   box-shadow: 0 0 20px rgba(244,67,54,0.8);
+ }
+
+.preview-planet.ice-planet {
+  background: radial-gradient(circle at 30% 30%, #a8edea, #4ecdc4, #45b7aa);
+  box-shadow: 0 0 20px rgba(78,205,196,0.8);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  animation: previewOrbitMove 4s linear infinite;
+}
+
+.preview-planet.ice-planet[data-color="cyan"] {
+   background: radial-gradient(circle at 30% 30%, #81d4fa, #29b6f6, #0288d1);
+   box-shadow: 0 0 20px rgba(41,182,246,0.8);
+ }
+ 
+ .preview-planet.ice-planet[data-color="green"] {
+   background: radial-gradient(circle at 30% 30%, #a5d6a7, #66bb6a, #43a047);
+   box-shadow: 0 0 20px rgba(102,187,106,0.8);
+ }
+
+ .preview-planet.ice-planet[data-color="teal"] {
+   background: radial-gradient(circle at 30% 30%, #80cbc4, #26a69a, #00695c);
+   box-shadow: 0 0 20px rgba(38,166,154,0.8);
+ }
+
+ .preview-planet.ice-planet[data-color="indigo"] {
+   background: radial-gradient(circle at 30% 30%, #9fa8da, #5c6bc0, #3949ab);
+   box-shadow: 0 0 20px rgba(92,107,192,0.8);
+ }
+
+ .preview-planet.ice-planet[data-color="mint"] {
+   background: radial-gradient(circle at 30% 30%, #b2dfdb, #4db6ac, #00695c);
+   box-shadow: 0 0 20px rgba(77,182,172,0.8);
+ }
+
+@keyframes previewOrbitMove {
+  from {
+    transform: translate(-50%, -50%) rotate(0deg) translateX(60px) rotate(0deg);
+  }
+  to {
+    transform: translate(-50%, -50%) rotate(360deg) translateX(60px) rotate(-360deg);
+  }
+}
+
+.preview-text {
+  font-size: 1.1rem;
+  color: rgba(255,255,255,0.8);
+  text-align: center;
+  margin: 0;
+  padding: 10px 20px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 10px;
+  backdrop-filter: blur(10px);
 }
 
 .game-title {
@@ -720,10 +961,60 @@ onUnmounted(() => {
   box-shadow: 0 0 20px rgba(255,107,107,0.8);
 }
 
+.fire-planet[data-color="orange"] {
+   background: radial-gradient(circle at 30% 30%, #ffa726, #ff9800, #f57c00);
+   box-shadow: 0 0 20px rgba(255,152,0,0.8);
+ }
+ 
+ .fire-planet[data-color="purple"] {
+   background: radial-gradient(circle at 30% 30%, #ba68c8, #9c27b0, #7b1fa2);
+   box-shadow: 0 0 20px rgba(156,39,176,0.8);
+ }
+
+ .fire-planet[data-color="pink"] {
+   background: radial-gradient(circle at 30% 30%, #f48fb1, #e91e63, #c2185b);
+   box-shadow: 0 0 20px rgba(233,30,99,0.8);
+ }
+
+ .fire-planet[data-color="yellow"] {
+   background: radial-gradient(circle at 30% 30%, #fff176, #ffeb3b, #fbc02d);
+   box-shadow: 0 0 20px rgba(255,235,59,0.8);
+ }
+
+ .fire-planet[data-color="crimson"] {
+   background: radial-gradient(circle at 30% 30%, #ef5350, #f44336, #d32f2f);
+   box-shadow: 0 0 20px rgba(244,67,54,0.8);
+ }
+
 .ice-planet {
   background: radial-gradient(circle at 30% 30%, #a8edea, #4ecdc4, #45b7aa);
   box-shadow: 0 0 20px rgba(78,205,196,0.8);
 }
+
+.ice-planet[data-color="cyan"] {
+   background: radial-gradient(circle at 30% 30%, #81d4fa, #29b6f6, #0288d1);
+   box-shadow: 0 0 20px rgba(41,182,246,0.8);
+ }
+ 
+ .ice-planet[data-color="green"] {
+   background: radial-gradient(circle at 30% 30%, #a5d6a7, #66bb6a, #43a047);
+   box-shadow: 0 0 20px rgba(102,187,106,0.8);
+ }
+
+ .ice-planet[data-color="teal"] {
+   background: radial-gradient(circle at 30% 30%, #80cbc4, #26a69a, #00695c);
+   box-shadow: 0 0 20px rgba(38,166,154,0.8);
+ }
+
+ .ice-planet[data-color="indigo"] {
+   background: radial-gradient(circle at 30% 30%, #9fa8da, #5c6bc0, #3949ab);
+   box-shadow: 0 0 20px rgba(92,107,192,0.8);
+ }
+
+ .ice-planet[data-color="mint"] {
+   background: radial-gradient(circle at 30% 30%, #b2dfdb, #4db6ac, #00695c);
+   box-shadow: 0 0 20px rgba(77,182,172,0.8);
+ }
 
 .planet.orbiting {
   animation: orbitGlow 0.5s ease-in-out infinite alternate;
@@ -1030,4 +1321,165 @@ onUnmounted(() => {
     opacity: 1;
   }
 }
-</style>
+
+/* 颜色选择器样式 */
+ .color-selector {
+   margin-top: 20px;
+   display: flex;
+   gap: 15px;
+   justify-content: center;
+ }
+ 
+ .color-btn {
+   display: flex;
+   align-items: center;
+   gap: 10px;
+   padding: 12px 20px;
+   background: rgba(255,255,255,0.1);
+   border: 2px solid rgba(255,255,255,0.3);
+   border-radius: 25px;
+   color: white;
+   font-weight: bold;
+   cursor: pointer;
+   transition: all 0.3s ease;
+   backdrop-filter: blur(10px);
+ }
+ 
+ .color-btn:hover {
+   background: rgba(255,255,255,0.2);
+   border-color: rgba(255,255,255,0.5);
+   transform: translateY(-2px);
+   box-shadow: 0 8px 15px rgba(0,0,0,0.3);
+ }
+ 
+ .btn-icon {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 2px solid white;
+    box-shadow: 0 0 8px rgba(255,255,255,0.3);
+  }
+
+  /* 颜色选择弹框样式 */
+  .color-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+    backdrop-filter: blur(5px);
+  }
+
+  .color-modal {
+    background: rgba(26,26,46,0.95);
+    border-radius: 20px;
+    padding: 0;
+    max-width: 500px;
+    width: 90%;
+    border: 2px solid rgba(255,255,255,0.2);
+    box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+    animation: modalSlideIn 0.3s ease-out;
+  }
+
+  @keyframes modalSlideIn {
+    from {
+      transform: scale(0.8);
+      opacity: 0;
+    }
+    to {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+
+  .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 25px;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .modal-header h3 {
+    margin: 0;
+    color: white;
+    font-size: 1.3rem;
+    background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .close-btn {
+    background: none;
+    border: none;
+    color: rgba(255,255,255,0.7);
+    font-size: 2rem;
+    cursor: pointer;
+    padding: 0;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    transition: all 0.3s ease;
+  }
+
+  .close-btn:hover {
+    background: rgba(255,255,255,0.1);
+    color: white;
+  }
+
+  .modal-content {
+    padding: 25px;
+  }
+
+  .color-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 15px;
+  }
+
+  .modal-color-option {
+    aspect-ratio: 1;
+    border-radius: 15px;
+    cursor: pointer;
+    border: 3px solid transparent;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: end;
+    justify-content: center;
+    padding: 10px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+  }
+
+  .modal-color-option:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 25px rgba(0,0,0,0.4);
+  }
+
+  .modal-color-option.active {
+    border-color: white;
+    transform: translateY(-3px) scale(1.05);
+    box-shadow: 0 0 20px rgba(255,255,255,0.6);
+  }
+
+  .color-name {
+    background: rgba(0,0,0,0.7);
+    color: white;
+    padding: 4px 8px;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    font-weight: bold;
+    text-transform: capitalize;
+    backdrop-filter: blur(5px);
+  }
+ </style>
