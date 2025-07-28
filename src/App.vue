@@ -19,7 +19,7 @@ const showCalibration = ref(false)
 const firePlanetColor = ref(localStorage.getItem('firePlanetColor') || 'red')
 const icePlanetColor = ref(localStorage.getItem('icePlanetColor') || 'blue')
 const showColorModal = ref(false)
-const currentEditingPlanet = ref('') // 'fire' or 'ice'
+const currentEditingPlanet = ref<'fire' | 'ice' | ''>('') // 'fire' or 'ice'
 
 // 颜色选项
 const colorOptions = {
@@ -51,7 +51,7 @@ watch(icePlanetColor, (newColor) => {
 })
 
 // 打开颜色选择弹框
-const openColorModal = (planetType: string) => {
+const openColorModal = (planetType: 'fire' | 'ice') => {
   currentEditingPlanet.value = planetType
   showColorModal.value = true
 }
@@ -666,7 +666,7 @@ onUnmounted(() => {
         <div class="modal-content">
           <div class="color-grid">
             <div 
-              v-for="color in colorOptions[currentEditingPlanet]"
+              v-for="color in colorOptions[currentEditingPlanet as 'fire' | 'ice']"
               :key="color.name"
               class="modal-color-option"
               :class="{ 
