@@ -15,6 +15,32 @@ const maxClickAttempts = 2
 const failureMessage = ref('')
 const showCalibration = ref(false)
 
+// 失败动画状态
+const isFailureAnimating = ref(false)
+const failedTileIndex = ref(-1)
+const blinkCount = ref(0)
+const isBlinking = ref(false)
+
+// 一圈内无操作检测
+const lastActionTime = ref(0)
+const orbitDuration = ref(0) // 一圈的时间（毫秒）
+
+// 粒子系统
+interface Particle {
+  id: number
+  x: number
+  y: number
+  vx: number
+  vy: number
+  life: number
+  maxLife: number
+  size: number
+  color: string
+}
+
+const particles = ref<Particle[]>([])
+const isParticleAnimating = ref(false)
+
 // 颜色选择
 const firePlanetColor = ref(localStorage.getItem('firePlanetColor') || 'red')
 const icePlanetColor = ref(localStorage.getItem('icePlanetColor') || 'blue')
@@ -214,6 +240,10 @@ const startGame = () => {
         orbitAngle.value = 0
       }
       
+      // 计算一圈的时间（2π / orbitSpeed 帧 * 16.67ms/帧）
+      orbitDuration.value = (2 * Math.PI / orbitSpeed) * (1000 / 60)
+      lastActionTime.value = Date.now()
+      
       startGameLoop()
     }
   }, 1000)
@@ -230,13 +260,174 @@ const stopGame = () => {
   }
 }
 
+// 失败动画处理
+const startFailureAnimation = (tileIndex: number) => {
+  isFailureAnimating.value = true
+  failedTileIndex.value = tileIndex
+  blinkCount.value = 0
+  
+  // 停止游戏循环但保持游戏状态
+  if (gameLoop) {
+    cancelAnimationFrame(gameLoop)
+    gameLoop = null
+  }
+  
+  // 开始闪烁动画
+  startBlinkAnimation()
+}
+
+// 闪烁动画
+const startBlinkAnimation = () => {
+  if (blinkCount.value >= 6) { // 闪烁3次（每次包含开和关）
+    // 闪烁结束，开始粒子粉碎效果
+    startParticleExplosion()
+    return
+  }
+  
+  isBlinking.value = !isBlinking.value
+  blinkCount.value++
+  
+  setTimeout(() => {
+    startBlinkAnimation()
+  }, 150) // 每300ms切换一次
+}
+
+// 粒子爆炸效果
+const startParticleExplosion = () => {
+  isParticleAnimating.value = true
+  particles.value = []
+  
+  // 获取两个星球的位置
+  const centerPlanet = planets.value.find(p => !p.isOrbiting)
+  const orbitingPlanetPos = getOrbitingPlanet.value
+  
+  if (centerPlanet) {
+    // 为中心星球创建粒子
+    createParticlesForPlanet(centerPlanet.x, centerPlanet.y, firePlanetColor.value)
+    // 为环绕星球创建粒子
+    createParticlesForPlanet(orbitingPlanetPos.x, orbitingPlanetPos.y, icePlanetColor.value)
+  }
+  
+  // 开始粒子动画循环
+  startParticleAnimation()
+}
+
+// 为单个星球创建粒子
+const createParticlesForPlanet = (x: number, y: number, colorName: string) => {
+  const colorOptions = {
+    fire: {
+      red: ['#ff6b6b', '#ff4757', '#ff3742'],
+      orange: ['#ffa726', '#ff9800', '#f57c00'],
+      purple: ['#ba68c8', '#9c27b0', '#7b1fa2'],
+      pink: ['#f48fb1', '#e91e63', '#c2185b'],
+      yellow: ['#fff176', '#ffeb3b', '#fbc02d'],
+      crimson: ['#ef5350', '#f44336', '#d32f2f']
+    },
+    ice: {
+      blue: ['#4ecdc4', '#45b7aa', '#3ba99c'],
+      cyan: ['#29b6f6', '#0288d1', '#0277bd'],
+      green: ['#66bb6a', '#43a047', '#388e3c'],
+      teal: ['#26a69a', '#00695c', '#004d40'],
+      indigo: ['#5c6bc0', '#3949ab', '#303f9f'],
+      mint: ['#4db6ac', '#00695c', '#004d40']
+    }
+  }
+  
+  // 确定颜色类型和颜色数组
+  let colors: string[] = []
+  if (colorName in colorOptions.fire) {
+    colors = colorOptions.fire[colorName as keyof typeof colorOptions.fire]
+  } else if (colorName in colorOptions.ice) {
+    colors = colorOptions.ice[colorName as keyof typeof colorOptions.ice]
+  } else {
+    colors = ['#ff6b6b', '#ff4757', '#ff3742'] // 默认红色
+  }
+  
+  // 创建30个粒子
+  for (let i = 0; i < 30; i++) {
+    const angle = (Math.PI * 2 * i) / 30 + Math.random() * 0.5
+    const speed = 2 + Math.random() * 4
+    const life = 60 + Math.random() * 40 // 60-100帧生命周期
+    
+    particles.value.push({
+      id: Date.now() + Math.random(),
+      x: x,
+      y: y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: life,
+      maxLife: life,
+      size: 3 + Math.random() * 4,
+      color: colors[Math.floor(Math.random() * colors.length)]
+    })
+  }
+}
+
+// 粒子动画循环
+const startParticleAnimation = () => {
+  const animateParticles = () => {
+    if (!isParticleAnimating.value) return
+    
+    // 更新粒子
+    particles.value = particles.value.filter(particle => {
+      particle.x += particle.vx
+      particle.y += particle.vy
+      particle.vy += 0.1 // 重力
+      particle.life--
+      
+      return particle.life > 0
+    })
+    
+    // 如果还有粒子，继续动画
+    if (particles.value.length > 0) {
+      requestAnimationFrame(animateParticles)
+    } else {
+      // 粒子动画结束，显示失败框
+      isParticleAnimating.value = false
+      setTimeout(() => {
+        isFailureAnimating.value = false
+        gameStarted.value = false
+        gameOver.value = true
+      }, 300)
+    }
+  }
+  
+  requestAnimationFrame(animateParticles)
+}
+
 // 游戏主循环
 const startGameLoop = () => {
   const loop = () => {
     if (!gameStarted.value) return
     
-    // 更新环绕角度
-    orbitAngle.value += orbitSpeed
+    // 失败动画期间停止旋转
+    if (!isFailureAnimating.value) {
+      // 更新环绕角度
+      orbitAngle.value += orbitSpeed
+      
+      // 检测一圈内无操作超时
+      const currentTime = Date.now()
+      if (currentTime - lastActionTime.value > orbitDuration.value) {
+        // 一圈内没有操作，算作失败
+        clickAttempts.value++
+        
+        if (clickAttempts.value >= maxClickAttempts) {
+          // 游戏结束
+          failureMessage.value = '一圈内无操作！游戏结束！'
+          combo.value = 0
+          startFailureAnimation(currentTileIndex.value)
+        } else {
+          // 还有机会，显示提示并重置计时器
+          failureMessage.value = `一圈内无操作！还有 ${maxClickAttempts - clickAttempts.value} 次机会`
+          combo.value = 0
+          lastActionTime.value = currentTime
+          
+          // 显示错误指示器
+          const orbitingPlanetPos = getOrbitingPlanet.value
+          showErrorIndicator(orbitingPlanetPos.x, orbitingPlanetPos.y)
+        }
+      }
+    }
     
     // 更新摄像机跟随
     const centerPlanet = planets.value.find(p => !p.isOrbiting)
@@ -267,10 +458,8 @@ const handleKeyDown = (event: KeyboardEvent) => {
 }
 
 const handleTap = () => {
-  // const currentTime = Date.now()
-  
-  // // 应用校准延迟补偿
-  // const adjustedTime = currentTime + calibrationDelay.value
+  // 更新最后操作时间
+  lastActionTime.value = Date.now()
   
   // 检查是否在正确的时机点击
   const currentTile = trackTiles.value[currentTileIndex.value]
@@ -288,6 +477,11 @@ const handleTap = () => {
   // 计算从中心星球到下一个瓦片的目标角度
   const targetAngle = Math.atan2(nextTile.y - centerPlanet.y, nextTile.x - centerPlanet.x)
   
+  // 应用延迟补偿：如果有延迟，需要预测小球在延迟时间后的位置
+  // 延迟补偿应该是减去延迟时间内小球会移动的角度
+  const delayCompensationAngle = (calibrationDelay.value / 1000) * orbitSpeed * 60
+  const compensatedCurrentAngle = orbitAngle.value - delayCompensationAngle
+  
   // 标准化角度到 [0, 2π] 范围
   const normalizeAngle = (angle: number) => {
     while (angle < 0) angle += 2 * Math.PI
@@ -296,7 +490,7 @@ const handleTap = () => {
   }
   
   const normalizedTarget = normalizeAngle(targetAngle)
-  const normalizedCurrent = normalizeAngle(orbitAngle.value)
+  const normalizedCurrent = normalizeAngle(compensatedCurrentAngle)
   
   // 计算角度差（考虑环形特性）
   let angleDiff = Math.abs(normalizedTarget - normalizedCurrent)
@@ -319,7 +513,7 @@ const handleTap = () => {
   console.log('点击次数:', clickAttempts.value + 1)
   
   // 更严格的击中判断：既要角度接近，也要距离接近
-  const hitAngleRange = Math.PI / 18 // 10度
+  const hitAngleRange = Math.PI / 12 // 15度
   const hitDistanceRange = 40 // 40像素内
   
   const isAngleGood = angleDiff < hitAngleRange
@@ -369,8 +563,12 @@ const handleTap = () => {
     // 错过了，增加点击次数
     clickAttempts.value++
     
-    // 在错误位置显示视觉反馈
-    showErrorIndicator(orbitingPlanetPos.x, orbitingPlanetPos.y)
+    // 计算考虑延迟补偿后的星球位置用于显示错误指示器
+    const compensatedPos = {
+      x: centerPlanet.x + Math.cos(compensatedCurrentAngle) * orbitRadius,
+      y: centerPlanet.y + Math.sin(compensatedCurrentAngle) * orbitRadius
+    }
+    showErrorIndicator(compensatedPos.x, compensatedPos.y)
     
     // 更精确的失败原因判断
     let feedbackMessage = ''
@@ -392,7 +590,7 @@ const handleTap = () => {
       // 两次机会都用完了，游戏结束
       failureMessage.value = `${feedbackMessage} 游戏结束！`
       combo.value = 0
-      stopGame()
+      startFailureAnimation(currentTileIndex.value)
     } else {
       // 还有机会，显示提示
       failureMessage.value = `${feedbackMessage} 还有 ${maxClickAttempts - clickAttempts.value} 次机会`
@@ -425,6 +623,17 @@ const showErrorIndicator = (x: number, y: number) => {
 // 游戏结束后的操作
 const restartGame = () => {
   gameOver.value = false
+  // 重置失败动画状态
+  isFailureAnimating.value = false
+  failedTileIndex.value = -1
+  blinkCount.value = 0
+  isBlinking.value = false
+  // 重置计时器状态
+  lastActionTime.value = 0
+  orbitDuration.value = 0
+  // 重置粒子状态
+  particles.value = []
+  isParticleAnimating.value = false
   startGame()
 }
 
@@ -438,6 +647,17 @@ const backToHome = () => {
   clickAttempts.value = 0
   failureMessage.value = ''
   errorIndicators.value = []
+  // 重置失败动画状态
+  isFailureAnimating.value = false
+  failedTileIndex.value = -1
+  blinkCount.value = 0
+  isBlinking.value = false
+  // 重置计时器状态
+  lastActionTime.value = 0
+  orbitDuration.value = 0
+  // 重置粒子状态
+  particles.value = []
+  isParticleAnimating.value = false
   if (gameLoop) {
     cancelAnimationFrame(gameLoop)
     gameLoop = null
@@ -553,7 +773,11 @@ onUnmounted(() => {
         v-for="tile in trackTiles" 
         :key="tile.id"
         class="track-tile"
-        :class="{ 'active-tile': tile.isActive, 'completed-tile': tile.id < currentTileIndex }"
+        :class="{ 
+          'active-tile': tile.isActive, 
+          'completed-tile': tile.id < currentTileIndex,
+          'failed-tile': tile.id === failedTileIndex && isFailureAnimating
+        }"
         :style="{ 
           left: tile.x + 'px', 
           top: tile.y + 'px' 
@@ -568,18 +792,23 @@ onUnmounted(() => {
           top: (trackTiles[currentTileIndex] ? trackTiles[currentTileIndex].y : planets[0].y) + 'px' 
         }"
       >
-        <div class="shared-orbit" :class="{ 'orbiting': planets.some(p => p.isOrbiting) }"></div>
+        <div class="shared-orbit" :class="{ 
+          'orbiting': planets.some(p => p.isOrbiting),
+          'blinking': isFailureAnimating && isBlinking
+        }"></div>
       </div>
       
       <!-- 星球 -->
       <div 
         v-for="(planet, index) in planets" 
         :key="index"
+        v-show="!isParticleAnimating"
         class="planet"
         :class="{ 
           'fire-planet': index === 0, 
           'ice-planet': index === 1,
-          'orbiting': planet.isOrbiting
+          'orbiting': planet.isOrbiting,
+          'blinking': isFailureAnimating && isBlinking
         }"
         :data-color="index === 0 ? firePlanetColor : icePlanetColor"
         :style="{ 
@@ -616,6 +845,21 @@ onUnmounted(() => {
           </div>
         </div>
       </div>
+      
+      <!-- 粒子效果 -->
+      <div 
+        v-for="particle in particles" 
+        :key="particle.id"
+        class="particle"
+        :style="{ 
+          left: particle.x + 'px', 
+          top: particle.y + 'px',
+          width: particle.size + 'px',
+          height: particle.size + 'px',
+          backgroundColor: particle.color,
+          opacity: particle.life / particle.maxLife
+        }"
+      ></div>
     </div>
     
     <!-- 开始/结束按钮 -->
@@ -632,7 +876,7 @@ onUnmounted(() => {
     </div>
     
     <!-- 游戏结束提示 -->
-    <div v-if="gameOver" class="game-over-overlay">
+    <div v-if="gameOver && !isFailureAnimating" class="game-over-overlay">
       <div class="game-over-content">
         <h2>{{ currentTileIndex >= trackTiles.length - 1 ? '恭喜完成!' : '游戏结束!' }}</h2>
         <p>最终得分: {{ score }}</p>
@@ -914,6 +1158,12 @@ onUnmounted(() => {
   border-color: rgba(100,255,100,0.8);
 }
 
+.track-tile.failed-tile {
+  background: rgba(255,50,50,0.8) !important;
+  border-color: rgba(255,50,50,1) !important;
+  box-shadow: 0 0 20px rgba(255,50,50,0.8) !important;
+}
+
 @keyframes activePulse {
   0%, 100% { transform: translate(-50%, -50%) scale(1); }
   50% { transform: translate(-50%, -50%) scale(1.2); }
@@ -1031,6 +1281,19 @@ onUnmounted(() => {
   }
 }
 
+/* 闪烁效果 */
+.blinking {
+  opacity: 0 !important;
+}
+
+.shared-orbit.blinking {
+  border-color: transparent !important;
+}
+
+.planet.blinking {
+  box-shadow: none !important;
+}
+
 /* 错误提示样式 */
 .error-indicator {
   position: absolute;
@@ -1141,6 +1404,26 @@ onUnmounted(() => {
 .game-controls .calibrate-btn:hover {
   transform: translateY(-2px);
   box-shadow: 0 8px 15px rgba(0,0,0,0.3);
+}
+
+/* 粒子效果样式 */
+.particle {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 6;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 4px currentColor;
+  animation: particleGlow 0.1s ease-in-out infinite alternate;
+}
+
+@keyframes particleGlow {
+  from { 
+    box-shadow: 0 0 2px currentColor;
+  }
+  to { 
+    box-shadow: 0 0 6px currentColor;
+  }
 }
 
 .game-over-overlay {

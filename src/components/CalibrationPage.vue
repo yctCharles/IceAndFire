@@ -6,6 +6,11 @@
       <div class="timer">{{ Math.ceil(remainingTime / 1000) }}s</div>
     </div>
 
+    <!-- 设置图标 - 右上角 -->
+    <div class="settings-icon" @click.stop="openManualSettings" title="手动设置延迟">
+      ⚙️
+    </div>
+
     <!-- 校准说明 -->
     <div class="calibration-info">
       <p>按键击打节拍，可随时加入。</p>
@@ -90,6 +95,34 @@
         <span class="stat-value">{{ Math.round(averageDelay) }}ms</span>
       </div>
     </div>
+
+    <!-- 手动设置延迟弹窗 -->
+    <div v-if="showManualSettings" class="manual-settings-overlay" @click="closeManualSettings">
+      <div class="manual-settings-modal" @click.stop>
+        <div class="modal-header">
+          <h3>手动设置延迟</h3>
+          <button class="close-btn" @click="closeManualSettings">×</button>
+        </div>
+        <div class="modal-content">
+          <div class="input-group">
+            <label for="delay-input">延迟时间 (ms):</label>
+            <input 
+              id="delay-input"
+              type="number" 
+              v-model.number="manualDelay" 
+              min="0" 
+              max="1000" 
+              step="1"
+              placeholder="请输入延迟时间"
+            />
+          </div>
+          <div class="modal-actions">
+            <button @click="applyManualDelay" class="apply-btn">应用</button>
+            <button @click="closeManualSettings" class="cancel-btn">取消</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -106,6 +139,10 @@ const clickTimes = ref<number[]>([])
 const clickAngles = ref<number[]>([])
 const averageDelay = ref(0)
 const calibrationAngle = ref(0)
+
+// 手动设置延迟
+const showManualSettings = ref(false)
+const manualDelay = ref(0)
 
 // 小球状态
 interface Ball {
@@ -274,6 +311,33 @@ const saveAndExit = () => {
   emit('close')
 }
 
+// 手动设置延迟相关函数
+const openManualSettings = () => {
+  manualDelay.value = Math.round(averageDelay.value) || 0
+  showManualSettings.value = true
+}
+
+const closeManualSettings = () => {
+  showManualSettings.value = false
+}
+
+const applyManualDelay = () => {
+  if (manualDelay.value >= 0 && manualDelay.value <= 1000) {
+    averageDelay.value = manualDelay.value
+    
+    // 保存手动设置的延迟到localStorage
+    const calibrationData = {
+      averageDelay: averageDelay.value,
+      clickCount: clickCount.value,
+      calibrationAngle: calibrationAngle.value,
+      isManuallySet: true
+    }
+    localStorage.setItem('audioCalibration', JSON.stringify(calibrationData))
+    
+    closeManualSettings()
+  }
+}
+
 // 开始校准
 const startCalibration = () => {
   if (gameLoop) cancelAnimationFrame(gameLoop)
@@ -346,6 +410,24 @@ onUnmounted(() => {
   font-weight: bold;
   color: #7c3aed;
   margin-top: 10px;
+}
+
+.settings-icon {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  font-size: 28px;
+  cursor: pointer;
+  padding: 8px;
+  transition: all 0.3s ease;
+  user-select: none;
+  z-index: 1500;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.settings-icon:hover {
+  color: rgba(255, 255, 255, 1);
+  transform: rotate(90deg);
 }
 
 .calibration-info {
@@ -548,5 +630,142 @@ onUnmounted(() => {
   font-size: 18px;
   font-weight: bold;
   color: #7c3aed;
+}
+
+/* 手动设置弹窗样式 */
+.manual-settings-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.manual-settings-modal {
+  background: white;
+  border-radius: 15px;
+  padding: 0;
+  min-width: 400px;
+  max-width: 500px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  animation: modalAppear 0.3s ease-out;
+}
+
+@keyframes modalAppear {
+  0% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 25px;
+  border-bottom: 1px solid #e5e7eb;
+  background: linear-gradient(45deg, #f3e8ff, #e0e7ff);
+  border-radius: 15px 15px 0 0;
+}
+
+.modal-header h3 {
+  margin: 0;
+  color: #6b46c1;
+  font-size: 18px;
+}
+
+.modal-header .close-btn {
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: #6b46c1;
+  padding: 0;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: background 0.2s ease;
+}
+
+.modal-header .close-btn:hover {
+  background: rgba(107, 70, 193, 0.1);
+}
+
+.modal-content {
+  padding: 25px;
+}
+
+.input-group {
+  margin-bottom: 20px;
+}
+
+.input-group label {
+  display: block;
+  margin-bottom: 8px;
+  color: #374151;
+  font-weight: 500;
+}
+
+.input-group input {
+  width: 100%;
+  padding: 12px 15px;
+  border: 2px solid #e5e7eb;
+  border-radius: 8px;
+  font-size: 16px;
+  transition: border-color 0.2s ease;
+  box-sizing: border-box;
+}
+
+.input-group input:focus {
+  outline: none;
+  border-color: #7c3aed;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.modal-actions button {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.apply-btn {
+  background: linear-gradient(45deg, #7c3aed, #a855f7);
+  color: white;
+}
+
+.apply-btn:hover {
+  background: linear-gradient(45deg, #6d28d9, #9333ea);
+  transform: translateY(-1px);
+}
+
+.cancel-btn {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.cancel-btn:hover {
+  background: #e5e7eb;
+  transform: translateY(-1px);
 }
 </style>
