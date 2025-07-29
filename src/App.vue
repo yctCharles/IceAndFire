@@ -21,6 +21,9 @@ const failedTileIndex = ref(-1)
 const blinkCount = ref(0)
 const isBlinking = ref(false)
 
+// 胜利动画状态
+const isVictoryAnimating = ref(false)
+
 // 一圈内无操作检测
 const lastActionTime = ref(0)
 const orbitDuration = ref(0) // 一圈的时间（毫秒）
@@ -250,14 +253,131 @@ const startGame = () => {
 }
 
 const stopGame = () => {
-  gameStarted.value = false
-  gameOver.value = true
-  isCountingDown.value = false
-  clickAttempts.value = 0
-  if (gameLoop) {
-    cancelAnimationFrame(gameLoop)
-    gameLoop = null
+  // 检查是否胜利（完成所有瓦片）
+  if (currentTileIndex.value >= trackTiles.value.length - 1) {
+    // 胜利情况，开始胜利动画
+    startVictoryAnimation()
+  } else {
+    // 普通结束游戏
+    gameStarted.value = false
+    gameOver.value = true
+    isCountingDown.value = false
+    clickAttempts.value = 0
+    if (gameLoop) {
+      cancelAnimationFrame(gameLoop)
+      gameLoop = null
+    }
   }
+}
+
+// 胜利动画处理
+const startVictoryAnimation = () => {
+  isVictoryAnimating.value = true
+  
+  // 不停止游戏循环，让小球继续旋转
+  // 开始烟花粒子效果
+  startVictoryParticleEffect()
+  
+  // 延迟3秒后显示胜利界面
+  setTimeout(() => {
+    isVictoryAnimating.value = false
+    gameStarted.value = false
+    gameOver.value = true
+    isCountingDown.value = false
+    clickAttempts.value = 0
+    if (gameLoop) {
+      cancelAnimationFrame(gameLoop)
+      gameLoop = null
+    }
+  }, 3000)
+}
+
+// 胜利烟花粒子效果
+const startVictoryParticleEffect = () => {
+  isParticleAnimating.value = true
+  particles.value = []
+  
+  // 创建多轮烟花效果
+  let fireworkCount = 0
+  const maxFireworks = 6 // 3秒内发射6次烟花
+  
+  const createFirework = () => {
+    if (fireworkCount >= maxFireworks || !isVictoryAnimating.value) {
+      return
+    }
+    
+    // 在最后一个卡片位置发射烟花
+    const lastTile = trackTiles.value[trackTiles.value.length - 1]
+    if (lastTile) {
+      // 在最后卡片周围随机偏移
+      const x = lastTile.x + (Math.random() - 0.5) * 100
+      const y = lastTile.y + (Math.random() - 0.5) * 100
+      
+      // 创建烟花粒子
+      createVictoryParticles(x, y)
+    }
+    
+    fireworkCount++
+    
+    // 每500ms发射一次烟花
+    setTimeout(createFirework, 500)
+  }
+  
+  // 开始第一次烟花
+  createFirework()
+  
+  // 开始粒子动画循环
+  startVictoryParticleAnimation()
+}
+
+// 创建胜利烟花粒子
+const createVictoryParticles = (x: number, y: number) => {
+  const colors = ['#FFD700', '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8']
+  
+  // 创建50个烟花粒子
+  for (let i = 0; i < 50; i++) {
+    const angle = (Math.PI * 2 * i) / 50 + Math.random() * 0.3
+    const speed = 3 + Math.random() * 5
+    const life = 80 + Math.random() * 40 // 80-120帧生命周期
+    
+    particles.value.push({
+      id: Date.now() + Math.random(),
+      x: x,
+      y: y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: life,
+      maxLife: life,
+      size: 2 + Math.random() * 3,
+      color: colors[Math.floor(Math.random() * colors.length)]
+    })
+  }
+}
+
+// 胜利粒子动画循环
+const startVictoryParticleAnimation = () => {
+  const animateParticles = () => {
+    if (!isVictoryAnimating.value) {
+      isParticleAnimating.value = false
+      particles.value = []
+      return
+    }
+    
+    // 更新粒子
+    particles.value = particles.value.filter(particle => {
+      particle.x += particle.vx
+      particle.y += particle.vy
+      particle.vy += 0.15 // 重力
+      particle.vx *= 0.99 // 空气阻力
+      particle.life--
+      
+      return particle.life > 0
+    })
+    
+    requestAnimationFrame(animateParticles)
+  }
+  
+  requestAnimationFrame(animateParticles)
 }
 
 // 失败动画处理
@@ -400,8 +520,8 @@ const startGameLoop = () => {
   const loop = () => {
     if (!gameStarted.value) return
     
-    // 失败动画期间停止旋转
-    if (!isFailureAnimating.value) {
+    // 失败动画和胜利动画期间停止旋转和检测
+    if (!isFailureAnimating.value && !isVictoryAnimating.value) {
       // 更新环绕角度
       orbitAngle.value += orbitSpeed
       
@@ -418,7 +538,7 @@ const startGameLoop = () => {
           startFailureAnimation(currentTileIndex.value)
         } else {
           // 还有机会，显示提示并重置计时器
-          failureMessage.value = `一圈内无操作！还有 ${maxClickAttempts - clickAttempts.value} 次机会`
+          failureMessage.value = `一圈内无操作！`
           combo.value = 0
           lastActionTime.value = currentTime
           
@@ -427,6 +547,9 @@ const startGameLoop = () => {
           showErrorIndicator(orbitingPlanetPos.x, orbitingPlanetPos.y)
         }
       }
+    } else if (isVictoryAnimating.value) {
+      // 胜利动画期间继续旋转但不检测无操作
+      orbitAngle.value += orbitSpeed
     }
     
     // 更新摄像机跟随
@@ -512,9 +635,9 @@ const handleTap = () => {
   console.log('距离目标:', distanceToTarget.toFixed(1), 'px')
   console.log('点击次数:', clickAttempts.value + 1)
   
-  // 更严格的击中判断：既要角度接近，也要距离接近
-  const hitAngleRange = Math.PI / 12 // 15度
-  const hitDistanceRange = 40 // 40像素内
+  // 更宽松的击中判断：既要角度接近，也要距离接近
+  const hitAngleRange = Math.PI / 8 // 22.5度
+  const hitDistanceRange = 60 // 60像素内
   
   const isAngleGood = angleDiff < hitAngleRange
   const isDistanceGood = distanceToTarget < hitDistanceRange
@@ -526,6 +649,7 @@ const handleTap = () => {
     score.value += 100 + combo.value * 10
     clickAttempts.value = 0 // 重置点击次数
     failureMessage.value = '' // 清除失败消息
+    lastActionTime.value = Date.now() // 重置操作时间，避免无操作检测
     
     console.log('击中成功！角度差:', (angleDiff * 180 / Math.PI).toFixed(1), '°', '距离:', distanceToTarget.toFixed(1), 'px')
     
@@ -536,6 +660,8 @@ const handleTap = () => {
     
     // 更新星球位置到新的瓦片
     const newCenterPlanet = planets.value.find(p => !p.isOrbiting)
+    const newOrbitingPlanet = planets.value.find(p => p.isOrbiting)
+    
     if (newCenterPlanet) {
       newCenterPlanet.x = nextTile.x
       newCenterPlanet.y = nextTile.y
@@ -548,6 +674,12 @@ const handleTap = () => {
       orbitAngle.value = angle - Math.PI / 2 // 让环绕星球朝向下一个瓦片方向
     } else {
       orbitAngle.value = 0
+    }
+    
+    // 立即更新环绕星球位置，确保它在正确的轨道上
+    if (newOrbitingPlanet && newCenterPlanet) {
+      newOrbitingPlanet.x = newCenterPlanet.x + Math.cos(orbitAngle.value) * orbitRadius
+      newOrbitingPlanet.y = newCenterPlanet.y + Math.sin(orbitAngle.value) * orbitRadius
     }
     
     // 更新活跃瓦片
